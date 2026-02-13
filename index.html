@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.5">
+    <title>NEO Messenger</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- ШАПКА -->
+        <div class="header">
+            <span class="logo">✨ NEO Messenger</span>
+            <div id="userMenu" class="user-menu"></div>
+        </div>
+
+        <!-- СЕКЦИЯ АВТОРИЗАЦИИ -->
+        <div id="authSection" class="auth-section">
+            <div class="auth-card">
+                <div class="tabs">
+                    <button id="tabLogin" class="tab active">Вход</button>
+                    <button id="tabRegister" class="tab">Регистрация</button>
+                </div>
+
+                <!-- форма входа -->
+                <div id="formLogin" class="form">
+                    <input type="text" id="loginUser" class="input" placeholder="Имя пользователя">
+                    <input type="password" id="loginPass" class="input" placeholder="Пароль">
+                    <button id="loginBtn" class="btn">Войти</button>
+                    <div id="loginMsg" class="msg"></div>
+                </div>
+
+                <!-- форма регистрации (скрыта) -->
+                <div id="formRegister" class="form" style="display: none;">
+                    <input type="text" id="regUser" class="input" placeholder="Имя пользователя">
+                    <input type="password" id="regPass" class="input" placeholder="Пароль">
+                    <input type="password" id="regConfirm" class="input" placeholder="Повторите пароль">
+                    <button id="registerBtn" class="btn">Создать аккаунт</button>
+                    <div id="regMsg" class="msg"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ИНТЕРФЕЙС ЧАТА (2 колонки) -->
+        <div id="chatInterface" class="chat-interface">
+            <!-- Левая панель: диалоги + поиск -->
+            <div class="sidebar">
+                <div class="search-box">
+                    <input type="text" id="searchInput" class="search-input" placeholder="🔍 Поиск людей...">
+                    <div id="searchResults" class="search-results"></div>
+                </div>
+                <div id="chatsList" class="chats-list"></div>
+            </div>
+
+            <!-- Правая панель: активный чат -->
+            <div class="chat-area">
+                <div id="chatHeader" class="chat-header" style="display: none;">
+                    <div class="avatar" id="chatAvatar">?</div>
+                    <div class="partner-info">
+                        <h3 id="chatPartnerName">Имя</h3>
+                        <p id="chatStatus">в сети</p>
+                    </div>
+                </div>
+                <div id="messagesContainer" class="messages-container"></div>
+                <div id="inputRow" class="input-row" style="display: none;">
+                    <input type="text" id="messageInput" class="chat-input" placeholder="Написать сообщение...">
+                    <button id="sendMsgBtn" class="send-button">
+                        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Весь JavaScript прямо здесь -->
+    <script>
+        // ========== ХРАНИЛИЩЕ ==========
+        const USERS_KEY = 'neo_users';
+        const MSGS_KEY = 'neo_messages';
+        const CURRENT_USER_KEY = 'neo_current_user';
+
+        if (!localStorage[USERS_KEY]) localStorage.setItem(USERS_KEY, JSON.stringify([]));
+        if (!localStorage[MSGS_KEY]) localStorage.setItem(MSGS_KEY, JSON.stringify([]));
+
+        let currentUser = null;
+        let activeChat = null;
+        let allMessages = [];
+        let pollingInterval = null;
+
+        // ========== DOM элементы ==========
+        const authSection = document.getElementById('authSection');
+        const chatInterface = document.getElementById('chatInterface');
+        const userMenu = document.getElementById('userMenu');
+        const tabLogin = document.getElementById('tabLogin');
+        const tabRegister = document.getElementById('tabRegister');
+        const formLogin = document.getElementById('formLogin');
+        const formRegister = document.getElementById('formRegister');
+        const loginUser = document.getElementById('loginUser');
+        const loginPass = document.getElementById('loginPass');
+        const loginBtn = document.getElementById('loginBtn');
+        const loginMsg = document.getElementById('loginMsg');
+        const regUser = document.getElementById('regUser');
+        const regPass = document.getElementById('regPass');
+        const regConfirm = document.getElementById('regConfirm');
+        const registerBtn = document.getElementById('registerBtn');
+        const regMsg = document.getElementById('regMsg');
+
+        const chatsList = document.getElementById('chatsList');
+        const searchInput = document.getElementById('searchInput');
+        const searchResults = document.getElementById('searchResults');
+        const chatHeader = document.getElementById('chatHeader');
+        const chatPartnerName = document.getElementById('chatPartnerName');
+        const chatAvatar = document.getElementById('chatAvatar');
+        const messagesContainer = document.getElementById('messagesContainer');
+        const messageInput = document.getElementById('messageInput');
+        const sendMsgBtn = document.getElementById('sendMsgBtn');
+        const inputRow = document.getElementById('inputRow');
+
+        // ========== ВКЛАДКИ ==========
+        tabLogin.addEventListener('click', () => {
+            tabLogin.classList.add('active');
+            tabRegister.classList.remove('active');
+            formLogin.style.display = 'flex';
+            formRegister.style.display = 'none';
+            loginMsg.textContent = '';
+            regMsg.textContent = '';
+        });
+
+        tabRegister.addEventListener('click', () => {
+            tabRegister.classList.add('active');
+            tabLogin.classList.remove('active');
+            formRegister.style.display = 'flex';
+            formLogin.style.display = 'none';
+            loginMsg.textContent = '';
+            regMsg.textContent = '';
+        });
+
+        // ========== РЕГИСТРАЦИЯ ==========
+        registerBtn.addEventListener('click', () => {
+            const username = regUser.value.trim();
+            const pass = regPass.value.trim();
+            const confirm = regConfirm.value.trim();
+            if (!username || !pass || !confirm) {
+                regMsg.textContent = 'Заполните все поля';
+                return;
+            }
+            if (pass !== confirm) {
+                regMsg.textContent = 'Пароли не совпадают';
+                return;
+            }
+            let users = JSON.parse(localStorage[USERS_KEY]);
+            if (users.find(u => u.username === username)) {
+                regMsg.textContent = 'Имя уже занято';
+                return;
+            }
+            users.push({ username, password: pass });
+            localStorage[USERS_KEY] = JSON.stringify(users);
+            regMsg.textContent = '✅ Аккаунт создан! Войдите.';
+            regMsg.style.color = '#a0ffa0';
+            regUser.value = '';
+            regPass.value = '';
+            regConfirm.value = '';
+            setTimeout(() => tabLogin.click(), 1000);
+        });
+
+        // ========== ВХОД ==========
+        loginBtn.addEventListener('click', () => {
+            const username = loginUser.value.trim();
+            const pass = loginPass.value.trim();
+            if (!username || !pass) {
+                loginMsg.textContent = 'Введите имя и пароль';
+                return;
+            }
+            let users = JSON.parse(localStorage[USERS_KEY]);
+            let user = users.find(u => u.username === username && u.password === pass);
+            if (!user) {
+                loginMsg.textContent = 'Неверные данные';
+                return;
+            }
+            currentUser = username;
+            localStorage[CURRENT_USER_KEY] = username;
+            showChatInterface();
+        });
+
+        // ========== ВЫХОД ==========
+        function logout() {
+            currentUser = null;
+            activeChat = null;
+            localStorage.removeItem(CURRENT_USER_KEY);
+            stopPolling();
+            showAuthInterface();
+        }
+
+        // ========== ПЕРЕКЛЮЧЕНИЕ СОСТОЯНИЙ ==========
+        function showAuthInterface() {
+            authSection.style.display = 'flex';
+            chatInterface.style.display = 'none';
+            userMenu.innerHTML = '';
+        }
+
+        function showChatInterface() {
+            authSection.style.display = 'none';
+            chatInterface.style.display = 'flex';
+            const firstLetter = currentUser ? currentUser[0].toUpperCase() : '?';
+            userMenu.innerHTML = `
+                <div class="user-badge">
+                    <span class="avatar">${firstLetter}</span>
+                    <span style="color:white;">${currentUser}</span>
+                </div>
+                <button id="globalLogoutBtn" class="logout-btn">Выйти</button>
+            `;
+            document.getElementById('globalLogoutBtn').addEventListener('click', logout);
+
+            loadMessages();
+            renderChatsList();
+            startPolling();
+        }
+
+        // ========== СООБЩЕНИЯ ==========
+        function loadMessages() {
+            allMessages = JSON.parse(localStorage[MSGS_KEY]) || [];
+        }
+
+        function saveMessages() {
+            localStorage[MSGS_KEY] = JSON.stringify(allMessages);
+        }
+
+        function getDialogs() {
+            if (!currentUser) return [];
+            const msgs = allMessages.filter(m => m.from === currentUser || m.to === currentUser);
+            const partners = new Set();
+            msgs.forEach(m => {
+                if (m.from === currentUser) partners.add(m.to);
+                else partners.add(m.from);
+            });
+            return Array.from(partners).map(p => {
+                const last = msgs.filter(m => (m.from === currentUser && m.to === p) || (m.from === p && m.to === currentUser))
+                                 .sort((a,b) => b.timestamp - a.timestamp)[0];
+                return { username: p, lastMessage: last?.text || '', lastTime: last?.time || '' };
+            }).sort((a,b) => (b.lastTime || '').localeCompare(a.lastTime || ''));
+        }
+
+        function renderChatsList() {
+            const dialogs = getDialogs();
+            chatsList.innerHTML = '';
+            if (dialogs.length === 0) {
+                chatsList.innerHTML = '<div style="color:rgba(255,255,255,0.3); text-align:center; padding:20px;">Нет чатов. Найдите собеседника через поиск.</div>';
+                return;
+            }
+            dialogs.forEach(d => {
+                const item = document.createElement('div');
+                item.className = `chat-item ${activeChat?.username === d.username ? 'active' : ''}`;
+                item.innerHTML = `
+                    <div class="avatar">${d.username[0].toUpperCase()}</div>
+                    <div class="chat-info">
+                        <div class="chat-name">${d.username}</div>
+                        <div class="last-message">${d.lastMessage.substring(0,30)}${d.lastMessage.length>30?'…':''}</div>
+                    </div>
+                `;
+                item.addEventListener('click', () => openChat(d.username));
+                chatsList.appendChild(item);
+            });
+        }
+
+        function openChat(partner) {
+            if (!currentUser) return;
+            activeChat = { username: partner };
+            chatHeader.style.display = 'flex';
+            inputRow.style.display = 'flex';
+            chatPartnerName.textContent = partner;
+            chatAvatar.textContent = partner[0].toUpperCase();
+            renderMessages(partner);
+            renderChatsList();
+        }
+
+        function renderMessages(partner) {
+            if (!partner) return;
+            const msgs = allMessages
+                .filter(m => (m.from === currentUser && m.to === partner) || (m.from === partner && m.to === currentUser))
+                .sort((a,b) => a.timestamp - b.timestamp);
+            messagesContainer.innerHTML = '';
+            if (msgs.length === 0) {
+                messagesContainer.innerHTML = '<div style="color:rgba(255,255,255,0.3); text-align:center; margin-top:30px;">Напишите первое сообщение</div>';
+                return;
+            }
+            msgs.forEach(m => {
+                const isOwn = m.from === currentUser;
+                const div = document.createElement('div');
+                div.className = `message ${isOwn ? 'own' : ''}`;
+                div.innerHTML = `
+                    <div class="bubble">${m.text}</div>
+                    <div class="meta"><span class="sender">${m.from}</span> <span>${m.time}</span></div>
+                `;
+                messagesContainer.appendChild(div);
+            });
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function sendMessage() {
+            if (!activeChat) return alert('Выберите чат');
+            const text = messageInput.value.trim();
+            if (!text) return;
+            const msg = {
+                from: currentUser,
+                to: activeChat.username,
+                text: text,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                timestamp: Date.now()
+            };
+            allMessages.push(msg);
+            saveMessages();
+            renderMessages(activeChat.username);
+            renderChatsList();
+            messageInput.value = '';
+        }
+
+        sendMsgBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // ========== ПОИСК ЛЮДЕЙ ==========
+        searchInput.addEventListener('input', function() {
+            const query = this.value.trim().toLowerCase();
+            if (query.length < 1) {
+                searchResults.classList.remove('active');
+                return;
+            }
+            let users = JSON.parse(localStorage[USERS_KEY]);
+            let filtered = users.filter(u => u.username !== currentUser && u.username.toLowerCase().includes(query));
+            if (filtered.length === 0) {
+                searchResults.innerHTML = '<div style="padding:12px; color:rgba(255,255,255,0.5);">Никого не найдено</div>';
+                searchResults.classList.add('active');
+                return;
+            }
+            let html = '';
+            filtered.forEach(u => {
+                html += `<div class="user-item" data-username="${u.username}">
+                            <span class="avatar" style="background: #1e5a9c;">${u.username[0].toUpperCase()}</span>
+                            <span>${u.username}</span>
+                         </div>`;
+            });
+            searchResults.innerHTML = html;
+            searchResults.classList.add('active');
+
+            document.querySelectorAll('.user-item').forEach(el => {
+                el.addEventListener('click', () => {
+                    const partner = el.dataset.username;
+                    openChat(partner);
+                    searchResults.classList.remove('active');
+                    searchInput.value = '';
+                });
+            });
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.search-box')) {
+                searchResults.classList.remove('active');
+            }
+        });
+
+        // ========== ПОЛЛИНГ ==========
+        function startPolling() {
+            if (pollingInterval) clearInterval(pollingInterval);
+            pollingInterval = setInterval(() => {
+                if (!currentUser) return;
+                const stored = JSON.parse(localStorage[MSGS_KEY]) || [];
+                if (stored.length !== allMessages.length) {
+                    allMessages = stored;
+                    if (activeChat) {
+                        renderMessages(activeChat.username);
+                    }
+                    renderChatsList();
+                }
+            }, 1200);
+        }
+
+        function stopPolling() {
+            if (pollingInterval) clearInterval(pollingInterval);
+            pollingInterval = null;
+        }
+
+        // ========== ИНИЦИАЛИЗАЦИЯ ==========
+        (function init() {
+            const saved = localStorage[CURRENT_USER_KEY];
+            if (saved) {
+                let users = JSON.parse(localStorage[USERS_KEY]);
+                if (users.find(u => u.username === saved)) {
+                    currentUser = saved;
+                    showChatInterface();
+                } else {
+                    localStorage.removeItem(CURRENT_USER_KEY);
+                    showAuthInterface();
+                }
+            } else {
+                showAuthInterface();
+            }
+        })();
+    </script>
+</body>
+</html>
